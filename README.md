@@ -13,15 +13,15 @@
 
 ### System Requirements
 
-You need Python 3 (3.7 or 3.6) and [LevelDB](https://github.com/google/leveldb) installed.
+You need Python 3 (3.7 or 3.6).
 
 OSX
 
-    brew install python leveldb
+    brew install python
 
 Debian/Ubuntu 16.10+
 
-    sudo apt-get install python3.7 python3.7-dev python3.7-venv python3-pip libleveldb-dev libssl-dev g++
+    sudo apt-get install python3.7 python3.7-dev python3.7-venv python3-pip
 
 ### Project Setup
 
