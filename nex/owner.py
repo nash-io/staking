@@ -101,5 +101,3 @@ def switch_owner(ctx, args):
         return True
 
     return False
-
-
