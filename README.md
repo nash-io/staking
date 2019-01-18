@@ -41,7 +41,7 @@ Then install the requirements via
 
 ## Compilation / Build
 
-The template may be manually compiled from the Python shell as follows
+The smart contract can be compiled from the Python shell as follows:
 
 ```python
 from boa.compiler import Compiler
