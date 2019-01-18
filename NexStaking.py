@@ -9,8 +9,8 @@ Date: Oct 12 2018
 
 """
 from nex.owner import *
-from boa.interop.Neo.Runtime import GetTrigger, CheckWitness, GetTime,Deserialize,Serialize
-from boa.interop.System.ExecutionEngine import GetExecutingScriptHash,GetScriptContainer
+from boa.interop.Neo.Runtime import GetTrigger, CheckWitness, GetTime, Deserialize, Serialize
+from boa.interop.System.ExecutionEngine import GetExecutingScriptHash, GetScriptContainer
 from boa.interop.Neo.TriggerType import Application, Verification
 from boa.interop.Neo.Storage import *
 from boa.interop.Neo.Action import RegisterAction
@@ -20,11 +20,11 @@ from boa.builtins import concat
 
 ctx = GetContext()
 
-OnStake = RegisterAction("onStake", "stakeID","addr","amount","rate","start","expiration")
-OnStakeComplete = RegisterAction("onStakeComplete", "stakeID","addr")
+OnStake = RegisterAction("onStake", "stakeID", "addr", "amount", "rate", "start", "expiration")
+OnStakeComplete = RegisterAction("onStakeComplete", "stakeID", "addr")
 
-STAKE_CONTRACT_KEY= 'stakingContract'
-STAKE_ADDR_KEY= 'addrStakes'
+STAKE_CONTRACT_KEY = 'stakingContract'
+STAKE_ADDR_KEY = 'addrStakes'
 
 SECONDS_PER_MONTH = 2629743
 
@@ -107,7 +107,7 @@ def calculateRate(duration):
 
     if duration < 1 or duration > 24:
         raise Exception("Invalid duration")
-    return (((((duration-1) *100) / 23 ) * 50 ) + 2500) / 100
+    return (((((duration-1) * 100) / 23) * 50) + 2500) / 100
 
 def stakeTokens(args):
     """
@@ -142,7 +142,6 @@ def stakeTokens(args):
     if Get(ctx, stakeId) > 0:
         raise Exception("Already stake for this transaction and address")
 
-
     args = [addr, GetExecutingScriptHash(), amount]
 
     transferOfTokens = DynamicAppCall(getStakingContract(), 'transferFrom', args)
@@ -159,7 +158,7 @@ def stakeTokens(args):
             'duration': duration,
             'startTime': now,
             'endTime': end,
-            'complete':False
+            'complete': False
         }
 
         addrStakeKey = concat(STAKE_ADDR_KEY, addr)
@@ -177,12 +176,11 @@ def stakeTokens(args):
 
         Put(ctx, addrStakeKey, Serialize(currentStakes))
 
-        OnStake(stakeId, addr, amount,rate,now,end)
+        OnStake(stakeId, addr, amount, rate, now, end)
 
         return True
 
     raise Exception("Could not transfer tokens to staking contract")
-
 
 
 def completeStake(args):
@@ -211,7 +209,7 @@ def completeStake(args):
         raise Exception("Not eligible to unstake yet")
 
     if stake['complete']:
-       raise Exception("Stake already completed")
+        raise Exception("Stake already completed")
 
     # transfer back to user
     args = [GetExecutingScriptHash(), addr, amount]
@@ -227,12 +225,11 @@ def completeStake(args):
 
         Put(ctx, addrStakeKey, Serialize(stakes))
 
-        OnStakeComplete(stakeID,addr)
+        OnStakeComplete(stakeID, addr)
 
         return True
 
     return False
-
 
 
 def getStakesForAddr(addr):
@@ -285,7 +282,7 @@ def getTotalStaked():
     tokenContract = getStakingContract()
     contractAddress = GetExecutingScriptHash()
     args = [contractAddress]
-    balance = DynamicAppCall(tokenContract,'balanceOf',args)
+    balance = DynamicAppCall(tokenContract, 'balanceOf', args)
 
     return balance
 
@@ -321,5 +318,3 @@ def getStakingContract():
     if len(contract) == 20:
         return contract
     raise Exception("Staking contract not set")
-
-
