@@ -8,7 +8,6 @@ Email: tom@neonexchange.org
 Date: Oct 12 2018
 
 """
-from nex.owner import *
 from boa.interop.Neo.Runtime import GetTrigger, CheckWitness, GetTime, Deserialize, Serialize
 from boa.interop.System.ExecutionEngine import GetExecutingScriptHash, GetScriptContainer
 from boa.interop.Neo.TriggerType import Application, Verification
@@ -17,6 +16,8 @@ from boa.interop.Neo.Action import RegisterAction
 from boa.interop.Neo.App import DynamicAppCall
 from boa.interop.Neo.Transaction import *
 from boa.builtins import concat
+from nash.owner import *
+from nash.whitelist import *
 
 ctx = GetContext()
 
@@ -28,6 +29,7 @@ STAKE_ADDR_KEY = 'addrStakes'
 
 SECONDS_PER_MONTH = 2629743
 
+STAKE_MODULUS = 100000000
 
 def Main(operation, args):
     """
@@ -92,6 +94,34 @@ def Main(operation, args):
         elif operation == 'switchOwner':
             return switch_owner(ctx, args)
 
+        elif operation == 'addWhitelistAdmin':
+            if len(args) == 1:
+                return addWhitelistAdmin(args[0])
+            raise Exception("Invalid Arguments")
+
+        elif operation == 'removeWhitelistAdmin':
+            if len(args) == 1:
+                return removeWhitelistAdmin(args[0])
+            raise Exception("Invalid Arguments")
+
+        elif operation == 'addToWhitelist':
+            if len(args) == 1:
+                return addToWhitelist(args[0])
+            raise Exception("Invalid Arguments")
+
+        elif operation == 'removeFromWhitelist':
+            if len(args) == 1:
+                return removeFromWhitelist(args[0])
+            raise Exception("Invalid Arguments")
+
+        elif operation == 'getWhitelistAdmins':
+            return getWhitelistAdmins()
+
+        elif operation == 'getKYCWhitelistStatus':
+            if len(args) == 1:
+                return isWhitelisted(args[0])
+            raise Exception("Invalid Arguments")
+
         raise Exception("Unknown operation")
 
     return False
@@ -109,6 +139,25 @@ def calculateRate(duration):
         raise Exception("Invalid duration")
     return (((((duration-1) * 100) / 23) * 50) + 2500) / 100
 
+def sanitizeAmount(amount):
+    """
+    Determines if the amount to be staked is sane
+
+    :param amount (int): The amount to be staked
+    :return: (int): sanitized amount
+    """
+
+    if amount <= 0:
+        raise Exception("Must be greater than zero")
+
+    # We cannot allow stakes that are not divisible by 100000000
+    # because this makes for some interesting issues when calculating
+    # dividends
+    if amount % STAKE_MODULUS != 0:
+        raise Exception("Must be divisible by 100000000")
+
+    return amount
+
 def stakeTokens(args):
     """
     Stakes the given amount of tokens for a user with the given duration
@@ -120,17 +169,17 @@ def stakeTokens(args):
     """
 
     addr = args[0]
-    amount = args[1]
+    amount = sanitizeAmount(args[1])
     duration = args[2]
 
     tx = GetScriptContainer()
     txHash = tx.Hash
 
+    if not isWhitelisted(addr):
+        raise Exception("Address must be whitelisted")
+
     if not CheckWitness(addr):
         raise Exception("Must be signed by staker addr")
-
-    if amount <= 0:
-        raise Exception("Invalid amount")
 
     if duration < 1 or duration > 24:
         raise Exception("Invalid duration")

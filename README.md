@@ -1,10 +1,10 @@
 <p align="center">
   <img
-    src="http://neonexchange.org/img/NEX-logo.svg"
-    width="125px;">
+    src="https://cdn-images-1.medium.com/letterbox/164/72/50/50/1*bGf9HZHNP3tOk4dSWcxUHA.png?source=logoAvatar-lo_dnt_VASJhQluBeQP---b71bf4ba23ad"
+    width="200px;">
 
 </p>
-<h3 align="center">NEX Staking Smart Contract</h3>
+<h3 align="center">Nash Staking Smart Contract</h3>
 <hr/>
 
 
@@ -46,10 +46,10 @@ The smart contract can be compiled from the Python shell as follows:
 ```python
 from boa.compiler import Compiler
 
-Compiler.load_and_save('NexStaking.py')
+Compiler.load_and_save('NashStaking.py')
 ```
 
-This will compile the contract to `NEX_Staking.avm`
+This will compile the contract to `NashStaking.avm`
 
 
 ## Bug Reporting
