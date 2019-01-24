@@ -24,7 +24,7 @@ The staking contract implements the following confines:
 The following items are not implemented in the smart contract, but rather calculated and managed by the Nash exchange Matching Engine:
 - Calculation of fee rewards
 - Distribution of fee rewards
-
+- Further information about the calculation of staking dividends can be found in section 4.2.1 of [the Nash whitepaper](https://nash.io/pdfs/whitepaper_v2.pdf)
 
 ## Installation
 
