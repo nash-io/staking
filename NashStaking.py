@@ -339,7 +339,7 @@ def setStakingContract(args):
     """
     Sets the token which will be used for staking
 
-    :param args: (list) a liist containing one item, namely the new staking contract address.
+    :param args: (list) a list containing one item, namely the new staking contract address.
     :return: (bool) success
     """
 
