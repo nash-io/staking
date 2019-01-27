@@ -1,5 +1,5 @@
 """
-NEX Staking
+Nash Staking
 ===================================
 
 Author: Thomas Saunders
