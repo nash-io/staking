@@ -3,33 +3,38 @@ Nash Staking
 ===================================
 
 Author: Thomas Saunders
-Email: tom@neonexchange.org
+Email: tom@nash.io
 
-Date: Oct 12 2018
+Date: Sep 30 2019
 
 """
-from boa.interop.Neo.Runtime import GetTrigger, CheckWitness, GetTime, Deserialize, Serialize
-from boa.interop.System.ExecutionEngine import GetExecutingScriptHash, GetScriptContainer
-from boa.interop.Neo.TriggerType import Application, Verification
-from boa.interop.Neo.Storage import *
-from boa.interop.Neo.Action import RegisterAction
-from boa.interop.Neo.App import DynamicAppCall
-from boa.interop.Neo.Transaction import *
 from boa.builtins import concat
+from boa.interop.Neo.Action import RegisterAction
+from boa.interop.Neo.App import RegisterAppCall
+from boa.interop.Neo.Runtime import CheckWitness, Deserialize, GetTime, GetTrigger, Serialize
+from boa.interop.Neo.Storage import *
+from boa.interop.Neo.Transaction import *
+from boa.interop.Neo.TriggerType import Application, Verification
+from boa.interop.System.ExecutionEngine import GetExecutingScriptHash, GetScriptContainer
+from boa.interop.Neo.Iterator import IterNext, IterKey, IterValue
+
 from nash.owner import *
-from nash.whitelist import *
 
 ctx = GetContext()
 
 OnStake = RegisterAction("onStake", "stakeID", "addr", "amount", "rate", "start", "expiration")
-OnStakeComplete = RegisterAction("onStakeComplete", "stakeID", "addr")
+OnLegacyStakeMigrated = RegisterAction("onLegacyStakeMigrated", "stakeID", "addr", "amount", "rate", "start", "expiration")
+OnStakeComplete = RegisterAction("onStakeComplete", "stakeID", "addr", "amount")
 
-STAKE_CONTRACT_KEY = 'stakingContract'
-STAKE_ADDR_KEY = 'addrStakes'
 
 SECONDS_PER_MONTH = 2629743
-
 STAKE_MODULUS = 100000000
+ADMIN_ADDR_PREFIX = 'adminAddress'
+
+NEX_TOKEN_APPCALL_STAKE = RegisterAppCall("3A4ACD3647086E7C44398AAC0349802E6A171129", 'transferFrom', 'args')
+NEX_TOKEN_APPCALL_UNSTAKE = RegisterAppCall("3A4ACD3647086E7C44398AAC0349802E6A171129", 'transfer', 'args')
+NEX_TOKEN_APPCALL_BALANCE = RegisterAppCall("3A4ACD3647086E7C44398AAC0349802E6A171129", "balanceOf", 'args')
+LEGACY_STAKE_QUERY = RegisterAppCall('3A41E7CE5F4002BE52FD3BFA962C1B4802E5D259', 'getStake', 'args')
 
 def Main(operation, args):
     """
@@ -46,8 +51,8 @@ def Main(operation, args):
     # To determine whether a transfer of system assets ( NEO/Gas) involving
     # This contract's address can proceed
     if trigger == Verification():
-        # Only owners can transfer NEO or GAS out of the contract
-        if check_owners(ctx, 3):
+        # This is used in case a contract migration is needed ( for example NEO3 transition)
+        if check_owners(ctx, 4):
             return True
         return False
 
@@ -59,18 +64,18 @@ def Main(operation, args):
             raise Exception("Invalid argument length")
 
         elif operation == 'completeStake':
-            if len(args) == 2:
-                return completeStake(args)
+            if len(args) == 1:
+                return completeStake(args[0])
             raise Exception("Invalid argument length")
 
         elif operation == 'getStake':
-            if len(args) == 2:
-                return getStake(args)
+            if len(args) == 1:
+                return getStakeById(args[0])
             raise Exception("Invalid argument length")
 
-        elif operation == 'getStakesForAddr':
+        elif operation == 'getStakesByAddress':
             if len(args) == 1:
-                return getStakesForAddr(args[0])
+                return getStakesByAddress(args[0])
             raise Exception("Invalid argument length")
 
         elif operation == 'totalStaked':
@@ -82,8 +87,6 @@ def Main(operation, args):
             raise Exception("Invalid argument length")
 
         # owner / admin methods
-        elif operation == 'setStakeTokenContract':
-            return setStakingContract(args)
 
         elif operation == 'initializeOwners':
             return initialize_owners(ctx)
@@ -94,33 +97,20 @@ def Main(operation, args):
         elif operation == 'switchOwner':
             return switch_owner(ctx, args)
 
-        elif operation == 'addWhitelistAdmin':
+        elif operation == 'setAdmin':
             if len(args) == 1:
-                return addWhitelistAdmin(args[0])
-            raise Exception("Invalid Arguments")
+                return setAdminAddress(args[0])
+            raise Exception("Invalid argument length")
 
-        elif operation == 'removeWhitelistAdmin':
-            if len(args) == 1:
-                return removeWhitelistAdmin(args[0])
-            raise Exception("Invalid Arguments")
+        elif operation == 'getAdmin':
+            if len(args) == 0:
+                return getAdminAddress()
+            raise Exception("Invalid argument length")
 
-        elif operation == 'addToWhitelist':
-            if len(args) == 1:
-                return addToWhitelist(args[0])
-            raise Exception("Invalid Arguments")
-
-        elif operation == 'removeFromWhitelist':
-            if len(args) == 1:
-                return removeFromWhitelist(args[0])
-            raise Exception("Invalid Arguments")
-
-        elif operation == 'getWhitelistAdmins':
-            return getWhitelistAdmins()
-
-        elif operation == 'getKYCWhitelistStatus':
-            if len(args) == 1:
-                return isWhitelisted(args[0])
-            raise Exception("Invalid Arguments")
+        elif operation == 'migrateStake':
+            if len(args) == 2:
+                return migrateStake(args[0], args[1])
+            raise Exception("Invalid argument length")
 
         raise Exception("Unknown operation")
 
@@ -138,6 +128,21 @@ def calculateRate(duration):
     if duration < 1 or duration > 24:
         raise Exception("Invalid duration")
     return (((((duration-1) * 100) / 23) * 50) + 2500) / 100
+
+
+def sanitizeAddress(addr):
+    """
+    Checks whether a bytearray is of length 20
+    Args:
+        addr (bytearray): an address to be sanitized
+
+    Returns:
+        addr (bytearray): sanitized address
+
+    """
+    if addr and len(addr) == 20:
+        return addr
+    raise Exception("Invalid Address")
 
 def sanitizeAmount(amount):
     """
@@ -168,15 +173,12 @@ def stakeTokens(args):
     :return: (bool): success
     """
 
-    addr = args[0]
+    addr = sanitizeAddress(args[0])
     amount = sanitizeAmount(args[1])
     duration = args[2]
 
     tx = GetScriptContainer()
     txHash = tx.Hash
-
-    if not isWhitelisted(addr):
-        raise Exception("Address must be whitelisted")
 
     if not CheckWitness(addr):
         raise Exception("Must be signed by staker addr")
@@ -186,14 +188,20 @@ def stakeTokens(args):
 
     rate = calculateRate(duration)
 
-    stakeId = concat(txHash, addr)
+    stake_id = concat(txHash, addr)
 
-    if Get(ctx, stakeId) > 0:
+    if Get(ctx, stake_id) > 0:
         raise Exception("Already stake for this transaction and address")
 
-    args = [addr, GetExecutingScriptHash(), amount]
+    # We save the reverse of the stake id so it can be queried
+    # with Storage.Find(addr).
+    # We would reverse this to make queryable_stake_id the real stake_id
+    # But this would break backwards compatibility with other systems.
+    queryable_stake_id = concat(addr, txHash)
 
-    transferOfTokens = DynamicAppCall(getStakingContract(), 'transferFrom', args)
+    contract_address = GetExecutingScriptHash()
+    args = [addr, contract_address, amount]
+    transferOfTokens = NEX_TOKEN_APPCALL_STAKE('transferFrom', args)
 
     if transferOfTokens:
 
@@ -201,7 +209,7 @@ def stakeTokens(args):
         end = now + (duration * SECONDS_PER_MONTH)
         stake = {
             'addr': addr,
-            'stakeId': stakeId,
+            'stakeId': stake_id,
             'rate': rate,
             'amount': amount,
             'duration': duration,
@@ -210,31 +218,24 @@ def stakeTokens(args):
             'complete': False
         }
 
-        addrStakeKey = concat(STAKE_ADDR_KEY, addr)
+        serialized_stake = Serialize(stake)
 
-        currentStakes = Get(ctx, addrStakeKey)
+        Put(ctx, stake_id, serialized_stake)
 
-        if len(currentStakes) < 1:
-            currentStakes = {}
-        else:
-            currentStakes = Deserialize(currentStakes)
+        # In addition to saving the stake, we also save the stake id
+        # In a queryable but cost effective manner
+        Put(ctx, queryable_stake_id, stake_id)
 
-        currentStakes[stakeId] = stake
-
-        Put(ctx, stakeId, 1)
-
-        Put(ctx, addrStakeKey, Serialize(currentStakes))
-
-        OnStake(stakeId, addr, amount, rate, now, end)
+        OnStake(stake_id, addr, amount, rate, now, end)
 
         return True
 
     raise Exception("Could not transfer tokens to staking contract")
 
 
-def completeStake(args):
+def completeStake(stake_id):
     """
-    Complete the stake specified by `stakeID`
+    Complete the stake specified by `stake_id`
     If the staking period is complete, this returns the staked tokens to the user, and dispatches a `complete` event
 
     Note that since this method can return tokens ONLY back to the address that originally staked the tokens, it can be called by anyone.
@@ -243,9 +244,7 @@ def completeStake(args):
     :return: (bool): success
     """
 
-    stakes = getStakesForAddr(args[0])
-    stakeID = args[1]
-    stake = stakes[stakeID]
+    stake = getStakeById(stake_id)
 
     if not stake:
         raise Exception("Could not find stake")
@@ -253,74 +252,62 @@ def completeStake(args):
     addr = stake['addr']
     amount = stake['amount']
     now = GetTime()
+    end = stake['endTime']
 
-    if stake['endTime'] > now:
+    if end > now:
         raise Exception("Not eligible to unstake yet")
 
     if stake['complete']:
         raise Exception("Stake already completed")
 
     # transfer back to user
-    args = [GetExecutingScriptHash(), addr, amount]
-
-    transferOfTokens = DynamicAppCall(getStakingContract(), 'transfer', args)
+    contract_address = GetExecutingScriptHash()
+    args = [contract_address, addr, amount]
+    transferOfTokens = NEX_TOKEN_APPCALL_UNSTAKE('transfer', args)
 
     if transferOfTokens:
 
-        stake['completed'] = True
+        stake['complete'] = True
 
-        stakes[stakeID] = stake
-        addrStakeKey = concat(STAKE_ADDR_KEY, addr)
+        serialized_stake = Serialize(stake)
+        Put(ctx, stake_id, serialized_stake)
 
-        Put(ctx, addrStakeKey, Serialize(stakes))
-
-        OnStakeComplete(stakeID, addr)
+        OnStakeComplete(stake_id, addr, amount)
 
         return True
 
-    return False
+    raise Exception("Could not complete stake")
 
 
-def getStakesForAddr(addr):
+def getStakeById(stake_id):
     """
-    Returns a dictionary of all stakes for an address
+    Returns a stake by id
 
-    :param addr (bytearray): The address in question
-    :return: dict: A dictionary of stake objects with the stakeIDs as the keys
+    :param addr (bytearray): The stake id in question
+    :return: dict: A stake object
 
     """
 
-    addrStakeKey = concat(STAKE_ADDR_KEY, addr)
-    stakeMapSerialized = Get(ctx, addrStakeKey)
+    stakeMapSerialized = Get(ctx, stake_id)
 
     if len(stakeMapSerialized):
         return Deserialize(stakeMapSerialized)
     return {}
 
 
-def getStake(args):
-    """
-    Returns details on a given stake for an address
+def getStakesByAddress(addr):
 
-    :param args (list): a list with the first item being the address in question and the second being the stakeID
-    :return: dict: A dictionary with the format:
-                   {
-                        'addr': addr,
-                        'stakeId': stakeId,
-                        'rate': rate,
-                        'amount': amount,
-                        'duration': duration,
-                        'startTime': now,
-                        'endTime': end,
-                        'complete':bool
-                    }
-    """
-    addr = args[0]
-    stakeId = args[1]
+    address = sanitizeAddress(addr)
 
-    stakes = getStakesForAddr(addr)
+    result_iter = Find(ctx, address)
 
-    return stakes[stakeId]
+    items = []
+    while result_iter.IterNext():
+        stake_id = result_iter.IterValue()
+        stake = getStakeById(stake_id)
+        items.append(stake)
+
+    return items
 
 def getTotalStaked():
     """
@@ -328,42 +315,56 @@ def getTotalStaked():
     :return: (int) Current amount of staked tokens
     """
 
-    tokenContract = getStakingContract()
     contractAddress = GetExecutingScriptHash()
-    args = [contractAddress]
-    balance = DynamicAppCall(tokenContract, 'balanceOf', args)
 
-    return balance
+    contract_balance = NEX_TOKEN_APPCALL_BALANCE('balanceOf', [contractAddress])
 
-def setStakingContract(args):
-    """
-    Sets the token which will be used for staking
+    return contract_balance
 
-    :param args: (list) a list containing one item, namely the new staking contract address.
-    :return: (bool) success
-    """
+def migrateStake(addr, stake_id):
 
-    # Check if contract is already set.
-    # Would be bad if this can be changed when
-    # tokens are already staked.
-    contract = Get(ctx, STAKE_CONTRACT_KEY)
-    if contract:
-        raise Exception("Cannot set staking contract, already set.")
+    if not isAdmin():
+        raise Exception('Insufficient Priveleges')
+
+    if Get(ctx, stake_id) > 0:
+        raise Exception("Already stake for this transaction and address")
+
+    legacy_stake = LEGACY_STAKE_QUERY('getStake', [addr, stake_id])
+
+    if legacy_stake['complete']:
+        raise Exception("Cannot migrate stake that has been completed")
+
+    if legacy_stake:
+        serialized_legacy_stake = Serialize(legacy_stake)
+
+        queryable_stake_id = concat(addr, stake_id)
+
+        Put(ctx, stake_id, serialized_legacy_stake)
+
+        Put(ctx, queryable_stake_id, stake_id)
+
+        OnLegacyStakeMigrated(stake_id, addr, legacy_stake['amount'], legacy_stake['rate'], legacy_stake['startTime'], legacy_stake['endTime'])
+
+        return legacy_stake
+
+    raise Exception("Could not find stake")
+
+def setAdminAddress(addr):
 
     if check_owners(ctx, 3):
-        contract = args[0]
-        if len(contract) == 20:
-            Put(ctx, STAKE_CONTRACT_KEY, contract)
-            return True
-    return False
 
-def getStakingContract():
-    """
-    Gets the contract address of the token which is being staked.
-    :return: (bytearray) address
-    """
+        address = sanitizeAddress(addr)
 
-    contract = Get(ctx, STAKE_CONTRACT_KEY)
-    if len(contract) == 20:
-        return contract
-    raise Exception("Staking contract not set")
+        Put(ctx, ADMIN_ADDR_PREFIX, address)
+
+        return True
+
+    raise Exception('Insufficient Permissions')
+
+def getAdminAddress():
+    return Get(ctx, ADMIN_ADDR_PREFIX)
+
+def isAdmin():
+    admin_address = getAdminAddress()
+
+    return CheckWitness(admin_address)
